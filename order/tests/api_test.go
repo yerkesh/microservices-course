@@ -18,10 +18,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	paySvc "ggithub.com/yerkesh/payment/pkg/service"
 	invSvc "github.com/yerkesh/inventory/pkg/service"
 	orderHandler "github.com/yerkesh/order/pkg/handler"
 	"github.com/yerkesh/order/tests/testutil"
+	paySvc "github.com/yerkesh/payment/pkg/service"
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
 	paymentv1 "github.com/yerkesh/shared/pkg/proto/payment/v1"
 )

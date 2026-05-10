@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sort"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
@@ -11,7 +12,7 @@ import (
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
 )
 
-// Part представляет деталь космического корабля
+// Part представляет деталь космического корабля.
 type Part struct {
 	UUID          string
 	Name          string
@@ -22,13 +23,13 @@ type Part struct {
 	CreatedAt     *timestamppb.Timestamp
 }
 
-// InventoryServer реализует gRPC сервис
+// InventoryServer реализует gRPC сервис.
 type InventoryServer struct {
 	inventoryv1.UnimplementedInventoryServiceServer
 	parts map[uuid.UUID]Part
 }
 
-// NewInventoryServer создаёт сервер с предзагруженными seed-данными
+// NewInventoryServer создаёт сервер с предзагруженными seed-данными.
 func NewInventoryServer() *InventoryServer {
 	now := timestamppb.Now()
 
@@ -92,40 +93,85 @@ func NewInventoryServer() *InventoryServer {
 	}
 }
 
-// GetPart возвращает деталь по UUID
+// GetPart возвращает деталь по UUID.
 func (s *InventoryServer) GetPart(
 	ctx context.Context,
 	req *inventoryv1.GetPartRequest,
 ) (*inventoryv1.GetPartResponse, error) {
-	// TODO: Реализовать метод
-	// 1. Проверить, что uuid не пустой → INVALID_ARGUMENT
-	// 2. Валидировать формат UUID → INVALID_ARGUMENT
-	// 3. Найти деталь в map
-	// 4. Если не найдена → NOT_FOUND
-	// 5. Преобразовать в inventoryv1.Part
-	// 6. Вернуть деталь
+	if req.GetUuid() == "" || req.GetUuid() == uuid.Nil.String() {
+		return nil, status.Error(codes.InvalidArgument, "invalid part uuid")
+	}
 
-	// TODO: Валидация формата UUID v4
-	// Можно использовать github.com/google/uuid:
-	// if _, err := uuid.Parse(req.GetUuid()); err != nil {
-	//     return nil, status.Errorf(codes.InvalidArgument, "неверный формат uuid: %s", req.GetUuid())
-	// }
+	if _, err := uuid.Parse(req.GetUuid()); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "неверный формат uuid: %s", req.GetUuid())
+	}
 
-	return nil, status.Error(codes.Unimplemented, "метод GetPart не реализован")
+	part := s.parts[uuid.MustParse(req.GetUuid())]
+	if part.UUID == "" {
+		return nil, status.Errorf(codes.NotFound, "part not found: %s", req.GetUuid())
+	}
+
+	return &inventoryv1.GetPartResponse{Part: &inventoryv1.Part{
+		Uuid:          part.UUID,
+		Name:          part.Name,
+		Description:   part.Description,
+		Price:         part.Price,
+		PartType:      part.PartType,
+		StockQuantity: part.StockQuantity,
+		CreatedAt:     part.CreatedAt,
+	}}, nil
 }
 
-// ListParts возвращает список деталей с опциональной фильтрацией по типу
+// ListParts возвращает список деталей с опциональной фильтрацией по типу.
 func (s *InventoryServer) ListParts(
 	ctx context.Context,
 	req *inventoryv1.ListPartsRequest,
 ) (*inventoryv1.ListPartsResponse, error) {
-	// TODO: Реализовать метод
-	// 1. Если передан список uuids → найти детали по UUID (сохраняя порядок запроса)
-	//    - Проверить формат каждого UUID → INVALID_ARGUMENT
-	//    - Если хоть один UUID не найден → NOT_FOUND
-	// 2. Иначе если part_type == UNSPECIFIED → вернуть все детали
-	// 3. Иначе → фильтровать по типу
-	// 4. Отсортировать по имени (только для фильтрации по типу, не для uuids)
+	if len(req.GetUuids()) > 0 {
+		var parts []*inventoryv1.Part
+		for _, uuidStr := range req.GetUuids() {
+			parsed, err := uuid.Parse(uuidStr)
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid uuid: %s", uuidStr)
+			}
 
-	return nil, status.Error(codes.Unimplemented, "метод ListParts не реализован")
+			part, ok := s.parts[parsed]
+			if !ok {
+				return nil, status.Errorf(codes.NotFound, "part not found: %s", uuidStr)
+			}
+
+			parts = append(parts, &inventoryv1.Part{
+				Uuid:          part.UUID,
+				Name:          part.Name,
+				Description:   part.Description,
+				Price:         part.Price,
+				PartType:      part.PartType,
+				StockQuantity: part.StockQuantity,
+				CreatedAt:     part.CreatedAt,
+			})
+		}
+
+		return &inventoryv1.ListPartsResponse{Parts: parts}, nil
+	}
+
+	var parts []*inventoryv1.Part
+	for _, part := range s.parts {
+		if req.GetPartType() == inventoryv1.PartType_PART_TYPE_UNSPECIFIED || part.PartType == req.GetPartType() {
+			parts = append(parts, &inventoryv1.Part{
+				Uuid:          part.UUID,
+				Name:          part.Name,
+				Description:   part.Description,
+				Price:         part.Price,
+				PartType:      part.PartType,
+				StockQuantity: part.StockQuantity,
+				CreatedAt:     part.CreatedAt,
+			})
+		}
+	}
+
+	sort.Slice(parts, func(i, j int) bool {
+		return parts[i].GetName() < parts[j].GetName()
+	})
+
+	return &inventoryv1.ListPartsResponse{Parts: parts}, nil
 }

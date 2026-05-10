@@ -1,30 +1,54 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
 	svc "github.com/yerkesh/inventory/pkg/service"
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
 )
 
-const grpcAddress = ":50051"
+const (
+	grpcAddress               = "127.0.0.1:50051"
+	grpcMaxConnectionIdle     = 15 * time.Minute
+	grpcMaxConnectionAge      = 30 * time.Minute
+	grpcMaxConnectionAgeGrace = 5 * time.Second
+	grpcKeepaliveTime         = 5 * time.Minute
+	grpcKeepaliveTimeout      = 1 * time.Second
+	grpcMinPingInterval       = 5 * time.Minute
+)
 
 func main() {
-	lis, err := net.Listen("tcp", grpcAddress)
+	var listenConfig net.ListenConfig
+	lis, err := listenConfig.Listen(context.Background(), "tcp", grpcAddress)
 	if err != nil {
 		slog.Error("не удалось создать listener", "error", err)
 		os.Exit(1)
 	}
 
-	// TODO: Настроить gRPC сервер с параметрами keepalive
-	// Подумайте, какие параметры стоит задать для production-ready сервера
-	// См. examples/week_1/GRPC_CONNECTIONS.md
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(
+		grpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionIdle:     grpcMaxConnectionIdle,
+			MaxConnectionAge:      grpcMaxConnectionAge,
+			MaxConnectionAgeGrace: grpcMaxConnectionAgeGrace,
+			Time:                  grpcKeepaliveTime,
+			Timeout:               grpcKeepaliveTimeout,
+		}),
+		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			PermitWithoutStream: true,
+			MinTime:             grpcMinPingInterval,
+		}),
+	)
+
 	inventoryv1.RegisterInventoryServiceServer(grpcServer, svc.NewInventoryServer())
 
 	// Включаем reflection для postman/grpcurl
@@ -32,16 +56,18 @@ func main() {
 
 	slog.Info("запуск InventoryService", "адрес", grpcAddress)
 
-	// TODO: Реализовать graceful shutdown
-	// При получении сигнала SIGINT/SIGTERM сервер должен:
-	// 1. Перестать принимать новые соединения
-	// 2. Дождаться завершения текущих запросов
-	// 3. Корректно завершить работу
-	// Подсказка: используйте signal.Notify и grpcServer.GracefulStop()
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
-	err = grpcServer.Serve(lis)
-	if err != nil {
-		slog.Error("ошибка запуска сервера", "error", err)
-		os.Exit(1)
-	}
+	go func() {
+		if serveErr := grpcServer.Serve(lis); serveErr != nil {
+			slog.Error("ошибка запуска сервера", "error", serveErr)
+			cancel()
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("🛑 остановка gRPC сервера")
+	grpcServer.GracefulStop()
+	slog.Info("✅ сервер остановлен")
 }
