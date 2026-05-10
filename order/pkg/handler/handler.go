@@ -2,12 +2,13 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	orderv1 "github.com/yerkesh/shared/pkg/openapi/order/v1"
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
@@ -65,6 +66,25 @@ func NewOrderHandler(
 // SetupServer создаёт OpenAPI сервер на основе обработчика.
 func SetupServer(h *OrderHandler) (*orderv1.Server, error) {
 	return orderv1.NewServer(h)
+}
+
+func uuidPtr(value uuid.UUID) *uuid.UUID {
+	return &value
+}
+
+func paymentMethodToProto(method orderv1.PaymentMethod) (paymentv1.PaymentMethod, bool) {
+	switch method {
+	case orderv1.PaymentMethodCARD:
+		return paymentv1.PaymentMethod_PAYMENT_METHOD_CARD, true
+	case orderv1.PaymentMethodSBP:
+		return paymentv1.PaymentMethod_PAYMENT_METHOD_SBP, true
+	case orderv1.PaymentMethodCREDITCARD:
+		return paymentv1.PaymentMethod_PAYMENT_METHOD_CREDIT_CARD, true
+	case orderv1.PaymentMethodINVESTORMONEY:
+		return paymentv1.PaymentMethod_PAYMENT_METHOD_INVESTOR_MONEY, true
+	default:
+		return paymentv1.PaymentMethod_PAYMENT_METHOD_UNSPECIFIED, false
+	}
 }
 
 // GetOrder реализует операцию getOrder (пример реализации).
@@ -128,24 +148,54 @@ func (h *OrderHandler) CreateOrder(ctx context.Context, req *orderv1.CreateOrder
 		}, nil
 	}
 
-	part, err := h.inventoryClient.GetPart(ctx, &inventoryv1.GetPartRequest{
-		Uuid: req.GetHullUUID().String(),
+	partUUIDs := []uuid.UUID{req.GetHullUUID(), req.GetEngineUUID()}
+
+	var shieldUUID *uuid.UUID
+	if value, ok := req.GetShieldUUID().Get(); ok {
+		shieldUUID = uuidPtr(value)
+		partUUIDs = append(partUUIDs, value)
+	}
+
+	var weaponUUID *uuid.UUID
+	if value, ok := req.GetWeaponUUID().Get(); ok {
+		weaponUUID = uuidPtr(value)
+		partUUIDs = append(partUUIDs, value)
+	}
+
+	partUUIDStrings := make([]string, 0, len(partUUIDs))
+	for _, partUUID := range partUUIDs {
+		partUUIDStrings = append(partUUIDStrings, partUUID.String())
+	}
+
+	parts, err := h.inventoryClient.ListParts(ctx, &inventoryv1.ListPartsRequest{
+		Uuids: partUUIDStrings,
 	})
 	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			return &orderv1.CreateOrderNotFound{
+				Code:    http.StatusNotFound,
+				Message: "деталь не найдена",
+			}, nil
+		}
+
 		return &orderv1.CreateOrderInternalServerError{
 			Code:    http.StatusInternalServerError,
-			Message: "ошибка при получении детали",
+			Message: "ошибка при получении деталей",
 		}, nil
 	}
 
-	if part.GetPart().GetStockQuantity() == 0 {
-		return &orderv1.CreateOrderConflict{
-			Code:    http.StatusConflict,
-			Message: "нет в наличии",
-		}, nil
+	var totalPrice int64
+	for _, part := range parts.GetParts() {
+		if part.GetStockQuantity() <= 0 {
+			return &orderv1.CreateOrderConflict{
+				Code:    http.StatusConflict,
+				Message: "нет в наличии",
+			}, nil
+		}
+
+		totalPrice += part.GetPrice()
 	}
 
-	totalPrice := part.GetPart().GetPrice() * part.GetPart().GetStockQuantity()
 	orderUUID, err := uuid.NewRandom()
 	if err != nil {
 		return &orderv1.CreateOrderInternalServerError{
@@ -159,8 +209,8 @@ func (h *OrderHandler) CreateOrder(ctx context.Context, req *orderv1.CreateOrder
 		OrderUUID:       orderUUID,
 		HullUUID:        req.GetHullUUID(),
 		EngineUUID:      req.GetEngineUUID(),
-		ShieldUUID:      nil,
-		WeaponUUID:      nil,
+		ShieldUUID:      shieldUUID,
+		WeaponUUID:      weaponUUID,
 		TotalPrice:      totalPrice,
 		TransactionUUID: nil,
 		PaymentMethod:   nil,
@@ -186,21 +236,27 @@ func (h *OrderHandler) PayOrder(ctx context.Context, req *orderv1.PayOrderReques
 	h.store.mu.RLock()
 	order, ok := h.store.orders[params.OrderUUID]
 	h.store.mu.RUnlock()
-	if !ok || order.Status != "PENDING_PAYMENT" {
-		return &orderv1.PayOrderBadRequest{
-			Code:    http.StatusBadRequest,
-			Message: "заказ не найден или не в ожидании оплаты",
+	if !ok {
+		return &orderv1.PayOrderNotFound{
+			Code:    http.StatusNotFound,
+			Message: "заказ не найден",
+		}, nil
+	}
+	if order.Status != "PENDING_PAYMENT" {
+		return &orderv1.PayOrderConflict{
+			Code:    http.StatusConflict,
+			Message: "заказ уже оплачен или отменён",
 		}, nil
 	}
 
 	rawMethod := req.GetPaymentMethod()
-
-	val, ok := paymentv1.PaymentMethod_value[string(rawMethod)]
+	paymentMethod, ok := paymentMethodToProto(rawMethod)
 	if !ok {
-		return nil, fmt.Errorf("unknown payment method: %s", rawMethod)
+		return &orderv1.PayOrderBadRequest{
+			Code:    http.StatusBadRequest,
+			Message: "невалидный метод оплаты",
+		}, nil
 	}
-
-	paymentMethod := paymentv1.PaymentMethod(val)
 
 	transactionUUID, err := h.paymentClient.PayOrder(ctx, &paymentv1.PayOrderRequest{
 		OrderUuid:     params.OrderUUID.String(),
@@ -224,6 +280,8 @@ func (h *OrderHandler) PayOrder(ctx context.Context, req *orderv1.PayOrderReques
 	h.store.mu.Lock()
 	order.Status = "PAID"
 	order.TransactionUUID = &transactionUUIDParsed
+	paymentMethodValue := string(rawMethod)
+	order.PaymentMethod = &paymentMethodValue
 	h.store.orders[params.OrderUUID] = order
 	h.store.mu.Unlock()
 
@@ -238,10 +296,16 @@ func (h *OrderHandler) CancelOrder(ctx context.Context, params orderv1.CancelOrd
 	h.store.mu.RLock()
 	order, ok := h.store.orders[params.OrderUUID]
 	h.store.mu.RUnlock()
-	if !ok || order.Status != "PENDING_PAYMENT" {
-		return &orderv1.CancelOrderBadRequest{
-			Code:    http.StatusBadRequest,
-			Message: "заказ не найден или не в ожидании оплаты",
+	if !ok {
+		return &orderv1.CancelOrderNotFound{
+			Code:    http.StatusNotFound,
+			Message: "заказ не найден",
+		}, nil
+	}
+	if order.Status != "PENDING_PAYMENT" {
+		return &orderv1.CancelOrderConflict{
+			Code:    http.StatusConflict,
+			Message: "заказ уже оплачен или отменён",
 		}, nil
 	}
 

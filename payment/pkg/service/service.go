@@ -29,7 +29,8 @@ func (s *PaymentServer) PayOrder(
 		return nil, status.Error(codes.InvalidArgument, "invalid payment method")
 	}
 
-	if uuid.MustParse(req.GetOrderUuid()) == uuid.Nil {
+	parsedOrderUUID, err := uuid.Parse(req.GetOrderUuid())
+	if err != nil || parsedOrderUUID == uuid.Nil {
 		return nil, status.Error(codes.InvalidArgument, "invalid order uuid")
 	}
 
