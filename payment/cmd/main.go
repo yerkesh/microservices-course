@@ -13,8 +13,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	svc "github.com/yerkesh/payment/pkg/service"
-	paymentv1 "github.com/yerkesh/shared/pkg/proto/payment/v1"
+	"github.com/yerkesh/payment/pkg/app"
 )
 
 const (
@@ -48,7 +47,7 @@ func main() {
 		PermitWithoutStream: true,
 	}))
 
-	paymentv1.RegisterPaymentServiceServer(grpcServer, &svc.PaymentServer{})
+	app.RegisterServices(grpcServer)
 
 	// Включаем reflection для postman/grpcurl
 	reflection.Register(grpcServer)

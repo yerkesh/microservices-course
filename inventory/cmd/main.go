@@ -13,8 +13,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 
-	svc "github.com/yerkesh/inventory/pkg/service"
-	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
+	"github.com/yerkesh/inventory/pkg/app"
 )
 
 const (
@@ -49,7 +48,7 @@ func main() {
 		}),
 	)
 
-	inventoryv1.RegisterInventoryServiceServer(grpcServer, svc.NewInventoryServer())
+	app.RegisterServices(grpcServer)
 
 	// Включаем reflection для postman/grpcurl
 	reflection.Register(grpcServer)

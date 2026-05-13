@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 
-	orderHandler "github.com/yerkesh/order/pkg/handler"
+	"github.com/yerkesh/order/pkg/app"
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
 	paymentv1 "github.com/yerkesh/shared/pkg/proto/payment/v1"
 )
@@ -66,16 +66,11 @@ func run() error {
 	}
 	defer paymentConn.Close()
 
-	// Создаём хранилище и обработчик
-	store := orderHandler.NewOrderStore()
-	h := orderHandler.NewOrderHandler(
+	// Создать OpenAPI сервер
+	orderServer, err := app.NewHTTPHandler(
 		inventoryv1.NewInventoryServiceClient(inventoryConn),
 		paymentv1.NewPaymentServiceClient(paymentConn),
-		store,
 	)
-
-	// Создать OpenAPI сервер
-	orderServer, err := orderHandler.SetupServer(h)
 	if err != nil {
 		slog.Error("ошибка создания сервера OpenAPI", "error", err)
 		return err

@@ -18,10 +18,10 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 
-	invSvc "github.com/yerkesh/inventory/pkg/service"
-	orderHandler "github.com/yerkesh/order/pkg/handler"
+	inventoryApp "github.com/yerkesh/inventory/pkg/app"
+	"github.com/yerkesh/order/pkg/app"
 	"github.com/yerkesh/order/tests/testutil"
-	paySvc "github.com/yerkesh/payment/pkg/service"
+	paymentApp "github.com/yerkesh/payment/pkg/app"
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
 	paymentv1 "github.com/yerkesh/shared/pkg/proto/payment/v1"
 )
@@ -75,8 +75,8 @@ func orderBaseURL() string {
 func TestMain(m *testing.M) {
 	// 1. Inventory gRPC через bufconn
 	invLis = bufconn.Listen(bufSize)
-	invGRPCServer := grpc.NewServer()
-	inventoryv1.RegisterInventoryServiceServer(invGRPCServer, invSvc.NewInventoryServer())
+	invGRPCServer := grpc.NewServer(inventoryApp.Interceptors()...)
+	inventoryApp.RegisterServices(invGRPCServer)
 	go func() {
 		if invServeErr := invGRPCServer.Serve(invLis); invServeErr != nil {
 			panic(invServeErr)
@@ -94,8 +94,8 @@ func TestMain(m *testing.M) {
 
 	// 2. Payment gRPC через bufconn
 	payLis = bufconn.Listen(bufSize)
-	payGRPCServer := grpc.NewServer()
-	paymentv1.RegisterPaymentServiceServer(payGRPCServer, &paySvc.PaymentServer{})
+	payGRPCServer := grpc.NewServer(paymentApp.Interceptors()...)
+	paymentApp.RegisterServices(payGRPCServer)
 	go func() {
 		if payServeErr := payGRPCServer.Serve(payLis); payServeErr != nil {
 			panic(payServeErr)
@@ -112,9 +112,7 @@ func TestMain(m *testing.M) {
 	paymentClient = paymentv1.NewPaymentServiceClient(payConn)
 
 	// 3. Order HTTP через httptest
-	store := orderHandler.NewOrderStore()
-	h := orderHandler.NewOrderHandler(inventoryClient, paymentClient, store)
-	orderServer, err := orderHandler.SetupServer(h)
+	orderServer, err := app.NewHTTPHandler(inventoryClient, paymentClient)
 	if err != nil {
 		panic(err)
 	}

@@ -12,6 +12,7 @@ vars:
   PROTOC_GEN_GO_VERSION: 'v1.36.11'
   PROTOC_GEN_GO_GRPC_VERSION: 'v1.6.1'
   OGEN_VERSION: 'v1.20.1'
+  MOCKERY_VERSION: 'v3.7.0'
 
   BIN_DIR: '{{.ROOT_DIR}}/bin'
   GOLANGCI_LINT: '{{.BIN_DIR}}/golangci-lint'
@@ -21,6 +22,11 @@ vars:
   PROTOC_GEN_GO: '{{.BIN_DIR}}/protoc-gen-go'
   PROTOC_GEN_GO_GRPC: '{{.BIN_DIR}}/protoc-gen-go-grpc'
   OGEN: '{{.BIN_DIR}}/ogen'
+  MOCKERY: '{{.BIN_DIR}}/mockery'
+
+  COVERAGE_DIR: '{{.ROOT_DIR}}/coverage'
+  COVERAGE_FILE: '{{.COVERAGE_DIR}}/coverage.out'
+  COVERAGE_THRESHOLD: '40'
 
   MODULES: order inventory payment shared
 
@@ -73,7 +79,22 @@ tasks:
 
   setup:
     desc: "Устанавливает все инструменты"
-    deps: [formatters:install, golangci-lint:install, buf:install, proto:install-plugins, ogen:install]
+    deps: [formatters:install, golangci-lint:install, buf:install, proto:install-plugins, ogen:install, mockery:install]
+
+  mockery:install:
+    desc: "Устанавливает mockery"
+    cmds:
+      - echo '📦 Устанавливаем mockery...'
+      - GOTOOLCHAIN=go1.26.0 GOBIN={{.BIN_DIR}} go install github.com/vektra/mockery/v3@{{.MOCKERY_VERSION}}
+    status:
+      - test -x {{.MOCKERY}}
+
+  mocks:gen:
+    desc: "Генерирует моки интерфейсов"
+    deps: [mockery:install]
+    cmds:
+      - echo '🧪 Генерация моков...'
+      - '{{.MOCKERY}}'
 
   format:
     desc: "Форматирует код (gofumpt + gci)"
@@ -133,3 +154,80 @@ tasks:
     desc: "Запускает API-тесты"
     cmds:
       - go test -v ./order/tests/...
+
+  test:
+    desc: "Запускает unit-тесты с race-детектором без API-тестов"
+    cmds:
+      - |
+        for mod in order inventory payment; do
+          echo "=== $mod ==="
+          (cd "$mod" && go test -v -race -count=1 $(go list ./... | grep -v '/tests'))
+        done
+
+  coverage:clean:
+    desc: "Очищает директорию с отчётами покрытия"
+    internal: true
+    cmds:
+      - rm -rf {{.COVERAGE_DIR}}
+      - mkdir -p {{.COVERAGE_DIR}}
+
+  test:coverage:
+    desc: "Тесты с покрытием бизнес-логики"
+    deps: [coverage:clean]
+    cmds:
+      - |
+        for mod in order inventory payment; do
+          echo "=== $mod ==="
+          (
+            cd "$mod"
+            TARGET_PACKAGES=$(go list ./... | grep -v "/mocks" | grep -E '/(api|service)/' | paste -sd, -)
+            TEST_PACKAGES=$(find . -name '*_test.go' -not -path './tests/*' -exec dirname {} \; | sort -u | xargs go list)
+            test -n "$TARGET_PACKAGES"
+            test -n "$TEST_PACKAGES"
+            echo "📦 Целевые пакеты:$TARGET_PACKAGES"
+            go test -v -race -covermode=atomic -coverprofile={{.COVERAGE_DIR}}/${mod}.out -coverpkg="$TARGET_PACKAGES" $TEST_PACKAGES
+          )
+        done
+      - echo "📊 Объединяем отчёты покрытия..."
+      - |
+        head -1 {{.COVERAGE_DIR}}/order.out > {{.COVERAGE_FILE}}
+        for f in {{.COVERAGE_DIR}}/order.out {{.COVERAGE_DIR}}/inventory.out {{.COVERAGE_DIR}}/payment.out; do
+          tail -n +2 "$f" >> {{.COVERAGE_FILE}}
+        done
+      - echo "📊 Покрытие по функциям:"
+      - go tool cover -func={{.COVERAGE_FILE}}
+      - task: coverage:threshold
+
+  coverage:threshold:
+    desc: "Проверяет соответствие покрытия порогу"
+    internal: true
+    vars:
+      COVERAGE:
+        sh: go tool cover -func={{.COVERAGE_FILE}} | tail -n1 | awk '{print $NF}' | tr -d '%'
+    preconditions:
+      - sh: test -f {{.COVERAGE_FILE}}
+        msg: "Файл покрытия не найден. Запустите task test:coverage"
+    cmds:
+      - echo "🧾 Общее покрытие:{{.COVERAGE}}% | Порог:{{.COVERAGE_THRESHOLD}}%"
+      - awk 'BEGIN { exit !({{.COVERAGE}} >= {{.COVERAGE_THRESHOLD}}) }'
+      - echo "✅ Покрытие соответствует порогу"
+
+  coverage:html:
+    desc: "Генерирует HTML-отчёт покрытия"
+    deps: [test:coverage]
+    vars:
+      HTML_FILE: '{{.COVERAGE_DIR}}/coverage.html'
+    cmds:
+      - go tool cover -html={{.COVERAGE_FILE}} -o {{.HTML_FILE}}
+      - echo "🌐 Отчёт сохранён в {{.HTML_FILE}}"
+      - cmd: open {{.HTML_FILE}}
+        platforms: [darwin]
+      - cmd: xdg-open {{.HTML_FILE}}
+        platforms: [linux]
+      - cmd: start {{.HTML_FILE}}
+        platforms: [windows]
+
+  coverage:check:
+    desc: "Проверяет покрытие без запуска тестов"
+    cmds:
+      - task: coverage:threshold

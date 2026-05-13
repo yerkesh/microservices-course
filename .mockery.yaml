@@ -1,0 +1,26 @@
+template: testify
+formatter: goimports
+dir: "{{.InterfaceDir}}/mocks"
+filename: "mock_{{ .InterfaceName | snakecase }}.go"
+pkgname: "mocks"
+structname: "{{.InterfaceName}}"
+force-file-write: true
+template-data:
+  boilerplate-file: ".mockery_boilerplate_text.txt"
+
+packages:
+  github.com/yerkesh/order/internal/api/order/v1:
+    config:
+      include-interface-regex: ".*Service"
+  github.com/yerkesh/order/internal/service/order:
+    config:
+      include-interface-regex: ".*(Repository|Client)"
+  github.com/yerkesh/inventory/internal/api/inventory/v1:
+    config:
+      include-interface-regex: ".*Service"
+  github.com/yerkesh/inventory/internal/service/part:
+    config:
+      include-interface-regex: ".*Repository"
+  github.com/yerkesh/payment/internal/api/payment/v1:
+    config:
+      include-interface-regex: ".*Service"
