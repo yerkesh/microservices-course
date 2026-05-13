@@ -1,4 +1,4 @@
 bin
 coverage
 .idea
-.env
+*.env
