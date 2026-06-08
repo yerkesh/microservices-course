@@ -26,11 +26,28 @@ const (
 	OrderStatusCancelled         OrderStatus = "CANCELLED"
 )
 
+// PartType описывает тип детали в составе заказа.
+type PartType string
+
+const (
+	PartTypeHull   PartType = "HULL"
+	PartTypeEngine PartType = "ENGINE"
+	PartTypeShield PartType = "SHIELD"
+	PartTypeWeapon PartType = "WEAPON"
+)
+
 // Part описывает деталь в доменной модели OrderService.
 type Part struct {
 	UUID          uuid.UUID
 	Price         int64
 	StockQuantity int64
+}
+
+// OrderItem описывает позицию заказа.
+type OrderItem struct {
+	PartUUID uuid.UUID
+	PartType PartType
+	Price    int64
 }
 
 // CreateOrderInput описывает входные данные создания заказа.
@@ -59,4 +76,5 @@ type Order struct {
 	PaymentMethod   *PaymentMethod
 	Status          OrderStatus
 	CreatedAt       time.Time
+	Items           []OrderItem
 }

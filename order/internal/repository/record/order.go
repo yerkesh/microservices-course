@@ -18,4 +18,12 @@ type Order struct {
 	PaymentMethod   *string
 	Status          string
 	CreatedAt       time.Time
+	Items           []OrderItem
+}
+
+// OrderItem хранит позицию заказа.
+type OrderItem struct {
+	PartUUID uuid.UUID
+	PartType string
+	Price    int64
 }

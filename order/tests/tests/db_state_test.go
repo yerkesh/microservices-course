@@ -6,7 +6,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/student/order/tests/testutil"
+	"github.com/yerkesh/order/tests/tests/testutil"
 )
 
 // Тесты этого файла дополняют api_test.go: после публичных API-вызовов
@@ -50,6 +50,7 @@ func TestDB_Order_Pay_PersistsTransactionAndStatus(t *testing.T) {
 
 	env.AssertOrderStatus(t, created.OrderUUID, "PAID")
 	env.AssertOrderTransactionEquals(t, created.OrderUUID, payResult.TransactionUUID, "SBP")
+	env.AssertPaymentTransaction(t, created.OrderUUID, payResult.TransactionUUID, "SBP")
 }
 
 func TestDB_Order_Cancel_PersistsStatus(t *testing.T) {

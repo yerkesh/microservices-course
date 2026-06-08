@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -57,7 +58,12 @@ func (e *Env) CreateOrder(t *testing.T, req *CreateOrderRequest) (*CreateOrderRe
 	body, err := json.Marshal(req)
 	require.NoError(t, err)
 
-	httpReq, err := http.NewRequest(http.MethodPost, e.BaseURL+"/api/v1/orders", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		e.BaseURL+"/api/v1/orders",
+		bytes.NewReader(body),
+	)
 	require.NoError(t, err)
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -76,7 +82,15 @@ func (e *Env) CreateOrder(t *testing.T, req *CreateOrderRequest) (*CreateOrderRe
 func (e *Env) GetOrder(t *testing.T, orderUUID string) (*OrderDTO, *http.Response) {
 	t.Helper()
 
-	resp, err := e.HTTPClient.Get(e.BaseURL + "/api/v1/orders/" + orderUUID)
+	httpReq, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodGet,
+		e.BaseURL+"/api/v1/orders/"+orderUUID,
+		nil,
+	)
+	require.NoError(t, err)
+
+	resp, err := e.HTTPClient.Do(httpReq)
 	require.NoError(t, err)
 
 	if resp.StatusCode == http.StatusOK {
@@ -94,8 +108,12 @@ func (e *Env) PayOrder(t *testing.T, orderUUID string, req *PayOrderRequest) (*P
 	body, err := json.Marshal(req)
 	require.NoError(t, err)
 
-	httpReq, err := http.NewRequest(http.MethodPost,
-		e.BaseURL+"/api/v1/orders/"+orderUUID+"/pay", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		e.BaseURL+"/api/v1/orders/"+orderUUID+"/pay",
+		bytes.NewReader(body),
+	)
 	require.NoError(t, err)
 	httpReq.Header.Set("Content-Type", "application/json")
 
@@ -114,8 +132,12 @@ func (e *Env) PayOrder(t *testing.T, orderUUID string, req *PayOrderRequest) (*P
 func (e *Env) CancelOrder(t *testing.T, orderUUID string) (*CancelOrderResponse, *http.Response) {
 	t.Helper()
 
-	httpReq, err := http.NewRequest(http.MethodPost,
-		e.BaseURL+"/api/v1/orders/"+orderUUID+"/cancel", nil)
+	httpReq, err := http.NewRequestWithContext(
+		context.Background(),
+		http.MethodPost,
+		e.BaseURL+"/api/v1/orders/"+orderUUID+"/cancel",
+		nil,
+	)
 	require.NoError(t, err)
 
 	resp, err := e.HTTPClient.Do(httpReq)

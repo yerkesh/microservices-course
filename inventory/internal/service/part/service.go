@@ -11,12 +11,13 @@ import (
 
 // Service реализует бизнес-логику каталога деталей.
 type Service struct {
-	repo Repository
+	txManager TxManager
+	repo      Repository
 }
 
 // New создаёт сервис деталей.
-func New(repo Repository) *Service {
-	return &Service{repo: repo}
+func New(txManager TxManager, repo Repository) *Service {
+	return &Service{txManager: txManager, repo: repo}
 }
 
 // Get возвращает деталь по UUID.
@@ -26,7 +27,16 @@ func (s *Service) Get(ctx context.Context, rawUUID string) (model.Part, error) {
 		return model.Part{}, err
 	}
 
-	return s.repo.Get(ctx, partUUID)
+	var part model.Part
+	if err = s.txManager.Do(ctx, func(ctx context.Context) error {
+		var err error
+		part, err = s.repo.Get(ctx, partUUID)
+		return err
+	}); err != nil {
+		return model.Part{}, err
+	}
+
+	return part, nil
 }
 
 // List возвращает список деталей.
@@ -41,7 +51,16 @@ func (s *Service) List(ctx context.Context, rawUUIDs []string, partType model.Pa
 		partUUIDs = append(partUUIDs, partUUID)
 	}
 
-	return s.repo.List(ctx, partUUIDs, partType)
+	var parts []model.Part
+	if err := s.txManager.Do(ctx, func(ctx context.Context) error {
+		var err error
+		parts, err = s.repo.List(ctx, partUUIDs, partType)
+		return err
+	}); err != nil {
+		return nil, err
+	}
+
+	return parts, nil
 }
 
 func parseUUID(rawUUID string) (uuid.UUID, error) {

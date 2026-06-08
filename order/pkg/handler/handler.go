@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+
 	apiv1 "github.com/yerkesh/order/internal/api/order/v1"
 	inventoryclient "github.com/yerkesh/order/internal/client/grpc/inventory/v1"
 	paymentclient "github.com/yerkesh/order/internal/client/grpc/payment/v1"
@@ -11,20 +13,26 @@ import (
 	paymentv1 "github.com/yerkesh/shared/pkg/proto/payment/v1"
 )
 
-// OrderStore сохраняет совместимость с кодом первой недели.
+type noopTxManager struct{}
+
+func (noopTxManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	return fn(ctx)
+}
+
+// OrderStore сохраняет совместимость с тестами на in-memory хранилище.
 type OrderStore struct {
-	repo *orderrepo.Repository
+	repo ordersvc.OrderRepository
 }
 
 // OrderHandler сохраняет совместимость с кодом первой недели.
 type OrderHandler = apiv1.API
 
-// NewOrderStore создаёт новое хранилище заказов.
+// NewOrderStore создаёт новое in-memory хранилище заказов.
 func NewOrderStore() *OrderStore {
-	return &OrderStore{repo: orderrepo.New()}
+	return &OrderStore{repo: orderrepo.NewMemory()}
 }
 
-// NewOrderHandler собирает OpenAPI handler заказов.
+// NewOrderHandler собирает OpenAPI handler заказов для тестов без PostgreSQL.
 func NewOrderHandler(
 	inventoryProtoClient inventoryv1.InventoryServiceClient,
 	paymentProtoClient paymentv1.PaymentServiceClient,
@@ -36,7 +44,7 @@ func NewOrderHandler(
 
 	inventoryClient := inventoryclient.New(inventoryProtoClient)
 	paymentClient := paymentclient.New(paymentProtoClient)
-	orderService := ordersvc.New(store.repo, inventoryClient, paymentClient)
+	orderService := ordersvc.New(noopTxManager{}, store.repo, inventoryClient, paymentClient)
 
 	return apiv1.New(orderService)
 }

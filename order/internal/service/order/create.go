@@ -22,15 +22,31 @@ func (s *Service) Create(ctx context.Context, input model.CreateOrderInput) (mod
 		return model.CreateOrderResult{}, errs.ErrInvalidUUID
 	}
 
-	partUUIDs := []string{
-		input.HullUUID.String(),
-		input.EngineUUID.String(),
+	type requestedPart struct {
+		uuid     uuid.UUID
+		partType model.PartType
+	}
+
+	requestedParts := []requestedPart{
+		{uuid: input.HullUUID, partType: model.PartTypeHull},
+		{uuid: input.EngineUUID, partType: model.PartTypeEngine},
 	}
 	if input.ShieldUUID != nil {
-		partUUIDs = append(partUUIDs, input.ShieldUUID.String())
+		requestedParts = append(requestedParts, requestedPart{
+			uuid:     *input.ShieldUUID,
+			partType: model.PartTypeShield,
+		})
 	}
 	if input.WeaponUUID != nil {
-		partUUIDs = append(partUUIDs, input.WeaponUUID.String())
+		requestedParts = append(requestedParts, requestedPart{
+			uuid:     *input.WeaponUUID,
+			partType: model.PartTypeWeapon,
+		})
+	}
+
+	partUUIDs := make([]string, 0, len(requestedParts))
+	for _, part := range requestedParts {
+		partUUIDs = append(partUUIDs, part.uuid.String())
 	}
 
 	parts, err := s.inventoryClient.ListParts(ctx, partUUIDs)
@@ -38,12 +54,30 @@ func (s *Service) Create(ctx context.Context, input model.CreateOrderInput) (mod
 		return model.CreateOrderResult{}, err
 	}
 
-	var totalPrice int64
+	partByUUID := make(map[uuid.UUID]model.Part, len(parts))
 	for _, part := range parts {
 		if part.StockQuantity <= 0 {
 			return model.CreateOrderResult{}, errs.ErrOutOfStock
 		}
-		totalPrice += part.Price
+
+		partByUUID[part.UUID] = part
+	}
+
+	items := make([]model.OrderItem, 0, len(requestedParts))
+	var totalPrice int64
+	for _, requestedPart := range requestedParts {
+		part, ok := partByUUID[requestedPart.uuid]
+		if !ok {
+			return model.CreateOrderResult{}, errs.ErrPartNotFound
+		}
+
+		item := model.OrderItem{
+			PartUUID: requestedPart.uuid,
+			PartType: requestedPart.partType,
+			Price:    part.Price,
+		}
+		items = append(items, item)
+		totalPrice += item.Price
 	}
 
 	orderUUID, err := uuid.NewRandom()
@@ -60,9 +94,12 @@ func (s *Service) Create(ctx context.Context, input model.CreateOrderInput) (mod
 		TotalPrice: totalPrice,
 		Status:     model.OrderStatusPendingPayment,
 		CreatedAt:  time.Now(),
+		Items:      items,
 	}
 
-	if err := s.orderRepo.Create(ctx, order); err != nil {
+	if err = s.txManager.Do(ctx, func(ctx context.Context) error {
+		return s.orderRepo.Create(ctx, order)
+	}); err != nil {
 		return model.CreateOrderResult{}, err
 	}
 

@@ -43,20 +43,35 @@ func (_m *OrderRepository) EXPECT() *OrderRepository_Expecter {
 }
 
 // Cancel provides a mock function for the type OrderRepository
-func (_mock *OrderRepository) Cancel(ctx context.Context, orderUUID uuid.UUID) error {
+func (_mock *OrderRepository) Cancel(ctx context.Context, orderUUID uuid.UUID) (model.Order, bool, error) {
 	ret := _mock.Called(ctx, orderUUID)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Cancel")
 	}
 
-	var r0 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID) error); ok {
+	var r0 model.Order
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID) (model.Order, bool, error)); ok {
+		return returnFunc(ctx, orderUUID)
+	}
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID) model.Order); ok {
 		r0 = returnFunc(ctx, orderUUID)
 	} else {
-		r0 = ret.Error(0)
+		r0 = ret.Get(0).(model.Order)
 	}
-	return r0
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uuid.UUID) bool); ok {
+		r1 = returnFunc(ctx, orderUUID)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+	if returnFunc, ok := ret.Get(2).(func(context.Context, uuid.UUID) error); ok {
+		r2 = returnFunc(ctx, orderUUID)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // OrderRepository_Cancel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Cancel'
@@ -89,12 +104,12 @@ func (_c *OrderRepository_Cancel_Call) Run(run func(ctx context.Context, orderUU
 	return _c
 }
 
-func (_c *OrderRepository_Cancel_Call) Return(err error) *OrderRepository_Cancel_Call {
-	_c.Call.Return(err)
+func (_c *OrderRepository_Cancel_Call) Return(order model.Order, b bool, err error) *OrderRepository_Cancel_Call {
+	_c.Call.Return(order, b, err)
 	return _c
 }
 
-func (_c *OrderRepository_Cancel_Call) RunAndReturn(run func(ctx context.Context, orderUUID uuid.UUID) error) *OrderRepository_Cancel_Call {
+func (_c *OrderRepository_Cancel_Call) RunAndReturn(run func(ctx context.Context, orderUUID uuid.UUID) (model.Order, bool, error)) *OrderRepository_Cancel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -157,7 +172,7 @@ func (_c *OrderRepository_Create_Call) RunAndReturn(run func(ctx context.Context
 }
 
 // FinishPayment provides a mock function for the type OrderRepository
-func (_mock *OrderRepository) FinishPayment(ctx context.Context, orderUUID uuid.UUID, transactionUUID uuid.UUID, method model.PaymentMethod) (model.Order, error) {
+func (_mock *OrderRepository) FinishPayment(ctx context.Context, orderUUID uuid.UUID, transactionUUID uuid.UUID, method model.PaymentMethod) (model.Order, bool, error) {
 	ret := _mock.Called(ctx, orderUUID, transactionUUID, method)
 
 	if len(ret) == 0 {
@@ -165,8 +180,9 @@ func (_mock *OrderRepository) FinishPayment(ctx context.Context, orderUUID uuid.
 	}
 
 	var r0 model.Order
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID, model.PaymentMethod) (model.Order, error)); ok {
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID, model.PaymentMethod) (model.Order, bool, error)); ok {
 		return returnFunc(ctx, orderUUID, transactionUUID, method)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID, uuid.UUID, model.PaymentMethod) model.Order); ok {
@@ -174,12 +190,17 @@ func (_mock *OrderRepository) FinishPayment(ctx context.Context, orderUUID uuid.
 	} else {
 		r0 = ret.Get(0).(model.Order)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, uuid.UUID, uuid.UUID, model.PaymentMethod) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uuid.UUID, uuid.UUID, model.PaymentMethod) bool); ok {
 		r1 = returnFunc(ctx, orderUUID, transactionUUID, method)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(bool)
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, uuid.UUID, uuid.UUID, model.PaymentMethod) error); ok {
+		r2 = returnFunc(ctx, orderUUID, transactionUUID, method)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // OrderRepository_FinishPayment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'FinishPayment'
@@ -224,12 +245,12 @@ func (_c *OrderRepository_FinishPayment_Call) Run(run func(ctx context.Context, 
 	return _c
 }
 
-func (_c *OrderRepository_FinishPayment_Call) Return(order model.Order, err error) *OrderRepository_FinishPayment_Call {
-	_c.Call.Return(order, err)
+func (_c *OrderRepository_FinishPayment_Call) Return(order model.Order, b bool, err error) *OrderRepository_FinishPayment_Call {
+	_c.Call.Return(order, b, err)
 	return _c
 }
 
-func (_c *OrderRepository_FinishPayment_Call) RunAndReturn(run func(ctx context.Context, orderUUID uuid.UUID, transactionUUID uuid.UUID, method model.PaymentMethod) (model.Order, error)) *OrderRepository_FinishPayment_Call {
+func (_c *OrderRepository_FinishPayment_Call) RunAndReturn(run func(ctx context.Context, orderUUID uuid.UUID, transactionUUID uuid.UUID, method model.PaymentMethod) (model.Order, bool, error)) *OrderRepository_FinishPayment_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -358,7 +379,7 @@ func (_c *OrderRepository_ResetPayment_Call) RunAndReturn(run func(ctx context.C
 }
 
 // StartPayment provides a mock function for the type OrderRepository
-func (_mock *OrderRepository) StartPayment(ctx context.Context, orderUUID uuid.UUID) (model.Order, error) {
+func (_mock *OrderRepository) StartPayment(ctx context.Context, orderUUID uuid.UUID) (model.Order, bool, error) {
 	ret := _mock.Called(ctx, orderUUID)
 
 	if len(ret) == 0 {
@@ -366,8 +387,9 @@ func (_mock *OrderRepository) StartPayment(ctx context.Context, orderUUID uuid.U
 	}
 
 	var r0 model.Order
-	var r1 error
-	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID) (model.Order, error)); ok {
+	var r1 bool
+	var r2 error
+	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID) (model.Order, bool, error)); ok {
 		return returnFunc(ctx, orderUUID)
 	}
 	if returnFunc, ok := ret.Get(0).(func(context.Context, uuid.UUID) model.Order); ok {
@@ -375,12 +397,17 @@ func (_mock *OrderRepository) StartPayment(ctx context.Context, orderUUID uuid.U
 	} else {
 		r0 = ret.Get(0).(model.Order)
 	}
-	if returnFunc, ok := ret.Get(1).(func(context.Context, uuid.UUID) error); ok {
+	if returnFunc, ok := ret.Get(1).(func(context.Context, uuid.UUID) bool); ok {
 		r1 = returnFunc(ctx, orderUUID)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(bool)
 	}
-	return r0, r1
+	if returnFunc, ok := ret.Get(2).(func(context.Context, uuid.UUID) error); ok {
+		r2 = returnFunc(ctx, orderUUID)
+	} else {
+		r2 = ret.Error(2)
+	}
+	return r0, r1, r2
 }
 
 // OrderRepository_StartPayment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'StartPayment'
@@ -413,12 +440,12 @@ func (_c *OrderRepository_StartPayment_Call) Run(run func(ctx context.Context, o
 	return _c
 }
 
-func (_c *OrderRepository_StartPayment_Call) Return(order model.Order, err error) *OrderRepository_StartPayment_Call {
-	_c.Call.Return(order, err)
+func (_c *OrderRepository_StartPayment_Call) Return(order model.Order, b bool, err error) *OrderRepository_StartPayment_Call {
+	_c.Call.Return(order, b, err)
 	return _c
 }
 
-func (_c *OrderRepository_StartPayment_Call) RunAndReturn(run func(ctx context.Context, orderUUID uuid.UUID) (model.Order, error)) *OrderRepository_StartPayment_Call {
+func (_c *OrderRepository_StartPayment_Call) RunAndReturn(run func(ctx context.Context, orderUUID uuid.UUID) (model.Order, bool, error)) *OrderRepository_StartPayment_Call {
 	_c.Call.Return(run)
 	return _c
 }

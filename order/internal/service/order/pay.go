@@ -16,9 +16,21 @@ func (s *Service) Pay(ctx context.Context, orderUUID uuid.UUID, method model.Pay
 		return uuid.Nil, errs.ErrInvalidPaymentMethod
 	}
 
-	order, err := s.orderRepo.StartPayment(ctx, orderUUID)
+	order, updated, err := s.orderRepo.StartPayment(ctx, orderUUID)
 	if err != nil {
 		return uuid.Nil, err
+	}
+	if !updated {
+		switch order.Status {
+		case model.OrderStatusPaymentProcessing:
+			return uuid.Nil, errs.ErrPaymentInProgress
+		case model.OrderStatusPaid:
+			return uuid.Nil, errs.ErrOrderAlreadyPaid
+		case model.OrderStatusCancelled:
+			return uuid.Nil, errs.ErrOrderCancelled
+		default:
+			return uuid.Nil, errs.ErrOrderNotFound
+		}
 	}
 
 	transactionUUID, err := s.paymentClient.PayOrder(ctx, order.OrderUUID.String(), method)
@@ -30,8 +42,19 @@ func (s *Service) Pay(ctx context.Context, orderUUID uuid.UUID, method model.Pay
 		return uuid.Nil, err
 	}
 
-	if _, err := s.orderRepo.FinishPayment(ctx, orderUUID, transactionUUID, method); err != nil {
+	if order, updated, err = s.orderRepo.FinishPayment(ctx, orderUUID, transactionUUID, method); err != nil {
 		return uuid.Nil, err
+	} else if !updated {
+		switch order.Status {
+		case model.OrderStatusPaymentProcessing:
+			return uuid.Nil, errs.ErrPaymentInProgress
+		case model.OrderStatusPaid:
+			return uuid.Nil, errs.ErrOrderAlreadyPaid
+		case model.OrderStatusCancelled:
+			return uuid.Nil, errs.ErrOrderCancelled
+		default:
+			return uuid.Nil, errs.ErrOrderNotFound
+		}
 	}
 
 	return transactionUUID, nil

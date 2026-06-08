@@ -17,6 +17,12 @@ type fakeRepository struct {
 	err   error
 }
 
+type noopTxManager struct{}
+
+func (noopTxManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	return fn(ctx)
+}
+
 func (r fakeRepository) Get(_ context.Context, partUUID uuid.UUID) (model.Part, error) {
 	if r.err != nil {
 		return model.Part{}, r.err
@@ -39,7 +45,7 @@ func (r fakeRepository) List(_ context.Context, partUUIDs []uuid.UUID, _ model.P
 
 func TestServiceGetSuccess(t *testing.T) {
 	partUUID := uuid.New()
-	s := New(fakeRepository{})
+	s := New(noopTxManager{}, fakeRepository{})
 
 	part, err := s.Get(context.Background(), partUUID.String())
 
@@ -48,7 +54,7 @@ func TestServiceGetSuccess(t *testing.T) {
 }
 
 func TestServiceGetInvalidUUID(t *testing.T) {
-	s := New(fakeRepository{})
+	s := New(noopTxManager{}, fakeRepository{})
 
 	_, err := s.Get(context.Background(), "не-uuid")
 
@@ -56,7 +62,7 @@ func TestServiceGetInvalidUUID(t *testing.T) {
 }
 
 func TestServiceListInvalidUUID(t *testing.T) {
-	s := New(fakeRepository{})
+	s := New(noopTxManager{}, fakeRepository{})
 
 	_, err := s.List(context.Background(), []string{uuid.NewString(), "не-uuid"}, model.PartTypeUnspecified)
 
@@ -65,7 +71,7 @@ func TestServiceListInvalidUUID(t *testing.T) {
 
 func TestServiceListRepositoryError(t *testing.T) {
 	repoErr := errors.New("репозиторий недоступен")
-	s := New(fakeRepository{err: repoErr})
+	s := New(noopTxManager{}, fakeRepository{err: repoErr})
 
 	_, err := s.List(context.Background(), []string{uuid.NewString()}, model.PartTypeUnspecified)
 

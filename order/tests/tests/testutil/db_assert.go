@@ -83,3 +83,20 @@ func (e *Env) AssertOrderItemsTotalPrice(t *testing.T, orderUUID string, want in
 	require.NoError(t, err)
 	assert.Equal(t, want, got, "сумма цен строк заказа в БД")
 }
+
+// AssertPaymentTransaction проверяет, что PaymentService сохранил платёж в БД.
+func (e *Env) AssertPaymentTransaction(t *testing.T, orderUUID, transactionUUID, wantMethod string) {
+	t.Helper()
+
+	var (
+		gotOrderUUID string
+		gotMethod    string
+	)
+	err := e.PaymentPool.QueryRow(context.Background(),
+		`SELECT order_uuid, payment_method FROM payments WHERE transaction_uuid = $1`, transactionUUID).
+		Scan(&gotOrderUUID, &gotMethod)
+	require.NoError(t, err)
+
+	assert.Equal(t, orderUUID, gotOrderUUID)
+	assert.Equal(t, wantMethod, gotMethod)
+}
