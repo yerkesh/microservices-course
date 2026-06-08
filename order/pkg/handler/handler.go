@@ -2,151 +2,54 @@ package handler
 
 import (
 	"context"
-	"net/http"
-	"sync"
-	"time"
 
-	"github.com/google/uuid"
-
+	apiv1 "github.com/yerkesh/order/internal/api/order/v1"
+	inventoryclient "github.com/yerkesh/order/internal/client/grpc/inventory/v1"
+	paymentclient "github.com/yerkesh/order/internal/client/grpc/payment/v1"
+	orderrepo "github.com/yerkesh/order/internal/repository/order"
+	ordersvc "github.com/yerkesh/order/internal/service/order"
 	orderv1 "github.com/yerkesh/shared/pkg/openapi/order/v1"
 	inventoryv1 "github.com/yerkesh/shared/pkg/proto/inventory/v1"
 	paymentv1 "github.com/yerkesh/shared/pkg/proto/payment/v1"
 )
 
-// Order представляет заказ на постройку космического корабля.
-type Order struct {
-	OrderUUID       uuid.UUID
-	HullUUID        uuid.UUID
-	EngineUUID      uuid.UUID
-	ShieldUUID      *uuid.UUID // опциональный
-	WeaponUUID      *uuid.UUID // опциональный
-	TotalPrice      int64      // в копейках
-	TransactionUUID *uuid.UUID
-	PaymentMethod   *string
-	Status          string // PENDING_PAYMENT, PAID, CANCELLED
-	CreatedAt       time.Time
+type noopTxManager struct{}
+
+func (noopTxManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	return fn(ctx)
 }
 
-// OrderStore — хранилище заказов (in-memory).
+// OrderStore сохраняет совместимость с тестами на in-memory хранилище.
 type OrderStore struct {
-	mu     sync.RWMutex
-	orders map[uuid.UUID]Order
+	repo ordersvc.OrderRepository
 }
 
-// NewOrderStore создаёт новое пустое хранилище заказов.
+// OrderHandler сохраняет совместимость с кодом первой недели.
+type OrderHandler = apiv1.API
+
+// NewOrderStore создаёт новое in-memory хранилище заказов.
 func NewOrderStore() *OrderStore {
-	return &OrderStore{
-		orders: make(map[uuid.UUID]Order),
-	}
+	return &OrderStore{repo: orderrepo.NewMemory()}
 }
 
-// OrderHandler реализует интерфейс orderv1.Handler, сгенерированный ogen.
-type OrderHandler struct {
-	orderv1.UnimplementedHandler
-	inventoryClient inventoryv1.InventoryServiceClient
-	paymentClient   paymentv1.PaymentServiceClient
-	store           *OrderStore
-}
-
-// NewOrderHandler создаёт новый обработчик заказов.
+// NewOrderHandler собирает OpenAPI handler заказов для тестов без PostgreSQL.
 func NewOrderHandler(
-	inventoryClient inventoryv1.InventoryServiceClient,
-	paymentClient paymentv1.PaymentServiceClient,
+	inventoryProtoClient inventoryv1.InventoryServiceClient,
+	paymentProtoClient paymentv1.PaymentServiceClient,
 	store *OrderStore,
 ) *OrderHandler {
-	return &OrderHandler{
-		inventoryClient: inventoryClient,
-		paymentClient:   paymentClient,
-		store:           store,
+	if store == nil {
+		store = NewOrderStore()
 	}
+
+	inventoryClient := inventoryclient.New(inventoryProtoClient)
+	paymentClient := paymentclient.New(paymentProtoClient)
+	orderService := ordersvc.New(noopTxManager{}, store.repo, inventoryClient, paymentClient)
+
+	return apiv1.New(orderService)
 }
 
-// SetupServer создаёт OpenAPI сервер на основе обработчика.
-func SetupServer(h *OrderHandler) (*orderv1.Server, error) {
+// SetupServer создаёт OpenAPI сервер.
+func SetupServer(h orderv1.Handler) (*orderv1.Server, error) {
 	return orderv1.NewServer(h)
 }
-
-// GetOrder реализует операцию getOrder (пример реализации).
-// GET /api/v1/orders/{order_uuid}.
-func (h *OrderHandler) GetOrder(_ context.Context, params orderv1.GetOrderParams) (orderv1.GetOrderRes, error) {
-	// 1. Найти заказ в store (с блокировкой для thread-safety)
-	h.store.mu.RLock()
-	order, ok := h.store.orders[params.OrderUUID]
-	h.store.mu.RUnlock()
-
-	// 2. Если не найден — вернуть 404
-	if !ok {
-		return &orderv1.GetOrderNotFound{
-			Code:    http.StatusNotFound,
-			Message: "заказ не найден",
-		}, nil
-	}
-
-	// 3. Преобразовать в DTO и вернуть
-	var shieldUUID orderv1.OptNilUUID
-	if order.ShieldUUID != nil {
-		shieldUUID = orderv1.NewOptNilUUID(*order.ShieldUUID)
-	}
-
-	var weaponUUID orderv1.OptNilUUID
-	if order.WeaponUUID != nil {
-		weaponUUID = orderv1.NewOptNilUUID(*order.WeaponUUID)
-	}
-
-	var transactionUUID orderv1.OptNilUUID
-	if order.TransactionUUID != nil {
-		transactionUUID = orderv1.NewOptNilUUID(*order.TransactionUUID)
-	}
-
-	var paymentMethod orderv1.OptNilPaymentMethod
-	if order.PaymentMethod != nil {
-		paymentMethod = orderv1.NewOptNilPaymentMethod(orderv1.PaymentMethod(*order.PaymentMethod))
-	}
-
-	return &orderv1.OrderDto{
-		OrderUUID:       order.OrderUUID,
-		HullUUID:        order.HullUUID,
-		EngineUUID:      order.EngineUUID,
-		ShieldUUID:      shieldUUID,
-		WeaponUUID:      weaponUUID,
-		TotalPrice:      order.TotalPrice,
-		TransactionUUID: transactionUUID,
-		PaymentMethod:   paymentMethod,
-		Status:          orderv1.OrderStatus(order.Status),
-		CreatedAt:       order.CreatedAt,
-	}, nil
-}
-
-// TODO: Реализовать остальные методы интерфейса orderv1.Handler:
-//
-// CreateOrder реализует операцию createOrder
-// POST /api/v1/orders
-// func (h *OrderHandler) CreateOrder(ctx context.Context, req *orderv1.CreateOrderRequest) (orderv1.CreateOrderRes, error) {
-//     // 1. Валидация: hull_uuid и engine_uuid обязательны
-//     // 2. Получить детали через InventoryService.GetPart
-//     // 3. Проверить stock_quantity > 0
-//     // 4. Вычислить total_price
-//     // 5. Сгенерировать order_uuid (UUID v4)
-//     // 6. Создать заказ со статусом PENDING_PAYMENT
-//     // 7. Сохранить в store
-//     // 8. Вернуть order_uuid и total_price
-// }
-//
-// PayOrder реализует операцию payOrder
-// POST /api/v1/orders/{order_uuid}/pay
-// func (h *OrderHandler) PayOrder(ctx context.Context, req *orderv1.PayOrderRequest, params orderv1.PayOrderParams) (orderv1.PayOrderRes, error) {
-//     // 1. Найти заказ в store
-//     // 2. Проверить статус == PENDING_PAYMENT
-//     // 3. Вызвать h.paymentClient.PayOrder для обработки платежа
-//     // 4. Обновить статус на PAID и сохранить transaction_uuid
-//     // 5. Вернуть transaction_uuid
-// }
-//
-// CancelOrder реализует операцию cancelOrder
-// POST /api/v1/orders/{order_uuid}/cancel
-// func (h *OrderHandler) CancelOrder(ctx context.Context, params orderv1.CancelOrderParams) (orderv1.CancelOrderRes, error) {
-//     // 1. Найти заказ в store
-//     // 2. Проверить статус == PENDING_PAYMENT
-//     // 3. Обновить статус на CANCELLED
-//     // 4. Вернуть success
-// }

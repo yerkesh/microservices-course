@@ -1,4 +1,3 @@
-# TODO: Не забудь поменять имя модуля github.com/student на своё
 #       и обновить все импорты в коде!
 #       Также обнови prefix в команде format (gci) и в .golangci.yml
 
@@ -13,6 +12,8 @@ vars:
   PROTOC_GEN_GO_VERSION: 'v1.36.11'
   PROTOC_GEN_GO_GRPC_VERSION: 'v1.6.1'
   OGEN_VERSION: 'v1.20.1'
+  MOCKERY_VERSION: 'v3.7.0'
+  GOOSE_VERSION: 'v3.27.1'
 
   BIN_DIR: '{{.ROOT_DIR}}/bin'
   GOLANGCI_LINT: '{{.BIN_DIR}}/golangci-lint'
@@ -22,6 +23,13 @@ vars:
   PROTOC_GEN_GO: '{{.BIN_DIR}}/protoc-gen-go'
   PROTOC_GEN_GO_GRPC: '{{.BIN_DIR}}/protoc-gen-go-grpc'
   OGEN: '{{.BIN_DIR}}/ogen'
+  MOCKERY: '{{.BIN_DIR}}/mockery'
+  GOOSE: '{{.BIN_DIR}}/goose'
+
+
+  COVERAGE_DIR: '{{.ROOT_DIR}}/coverage'
+  COVERAGE_FILE: '{{.COVERAGE_DIR}}/coverage.out'
+  COVERAGE_THRESHOLD: '40'
 
   MODULES: order inventory payment shared
 
@@ -74,7 +82,22 @@ tasks:
 
   setup:
     desc: "Устанавливает все инструменты"
-    deps: [formatters:install, golangci-lint:install, buf:install, proto:install-plugins, ogen:install]
+    deps: [formatters:install, golangci-lint:install, buf:install, proto:install-plugins, ogen:install, mockery:install]
+
+  mockery:install:
+    desc: "Устанавливает mockery"
+    cmds:
+      - echo '📦 Устанавливаем mockery...'
+      - GOTOOLCHAIN=go1.26.0 GOBIN={{.BIN_DIR}} go install github.com/vektra/mockery/v3@{{.MOCKERY_VERSION}}
+    status:
+      - test -x {{.MOCKERY}}
+
+  mocks:gen:
+    desc: "Генерирует моки интерфейсов"
+    deps: [mockery:install]
+    cmds:
+      - echo '🧪 Генерация моков...'
+      - '{{.MOCKERY}}'
 
   format:
     desc: "Форматирует код (gofumpt + gci)"
@@ -134,3 +157,222 @@ tasks:
     desc: "Запускает API-тесты"
     cmds:
       - go test -v ./order/tests/...
+
+  test:
+    desc: "Запускает unit-тесты с race-детектором без API-тестов"
+    cmds:
+      - |
+        for mod in order inventory payment; do
+          echo "=== $mod ==="
+          (cd "$mod" && go test -v -race -count=1 $(go list ./... | grep -v '/tests'))
+        done
+
+  coverage:clean:
+    desc: "Очищает директорию с отчётами покрытия"
+    internal: true
+    cmds:
+      - rm -rf {{.COVERAGE_DIR}}
+      - mkdir -p {{.COVERAGE_DIR}}
+
+  test:coverage:
+    desc: "Тесты с покрытием бизнес-логики"
+    deps: [coverage:clean]
+    cmds:
+      - |
+        for mod in order inventory payment; do
+          echo "=== $mod ==="
+          (
+            cd "$mod"
+            TARGET_PACKAGES=$(go list ./... | grep -v "/mocks" | grep -E '/(api|service)/' | paste -sd, -)
+            TEST_PACKAGES=$(find . -name '*_test.go' -not -path './tests/*' -exec dirname {} \; | sort -u | xargs go list)
+            test -n "$TARGET_PACKAGES"
+            test -n "$TEST_PACKAGES"
+            echo "📦 Целевые пакеты:$TARGET_PACKAGES"
+            go test -v -race -covermode=atomic -coverprofile={{.COVERAGE_DIR}}/${mod}.out -coverpkg="$TARGET_PACKAGES" $TEST_PACKAGES
+          )
+        done
+      - echo "📊 Объединяем отчёты покрытия..."
+      - |
+        head -1 {{.COVERAGE_DIR}}/order.out > {{.COVERAGE_FILE}}
+        for f in {{.COVERAGE_DIR}}/order.out {{.COVERAGE_DIR}}/inventory.out {{.COVERAGE_DIR}}/payment.out; do
+          tail -n +2 "$f" >> {{.COVERAGE_FILE}}
+        done
+      - echo "📊 Покрытие по функциям:"
+      - go tool cover -func={{.COVERAGE_FILE}}
+      - task: coverage:threshold
+
+  coverage:threshold:
+    desc: "Проверяет соответствие покрытия порогу"
+    internal: true
+    vars:
+      COVERAGE:
+        sh: go tool cover -func={{.COVERAGE_FILE}} | tail -n1 | awk '{print $NF}' | tr -d '%'
+    preconditions:
+      - sh: test -f {{.COVERAGE_FILE}}
+        msg: "Файл покрытия не найден. Запустите task test:coverage"
+    cmds:
+      - echo "🧾 Общее покрытие:{{.COVERAGE}}% | Порог:{{.COVERAGE_THRESHOLD}}%"
+      - awk 'BEGIN { exit !({{.COVERAGE}} >= {{.COVERAGE_THRESHOLD}}) }'
+      - echo "✅ Покрытие соответствует порогу"
+
+  coverage:html:
+    desc: "Генерирует HTML-отчёт покрытия"
+    deps: [test:coverage]
+    vars:
+      HTML_FILE: '{{.COVERAGE_DIR}}/coverage.html'
+    cmds:
+      - go tool cover -html={{.COVERAGE_FILE}} -o {{.HTML_FILE}}
+      - echo "🌐 Отчёт сохранён в {{.HTML_FILE}}"
+      - cmd: open {{.HTML_FILE}}
+        platforms: [darwin]
+      - cmd: xdg-open {{.HTML_FILE}}
+        platforms: [linux]
+      - cmd: start {{.HTML_FILE}}
+        platforms: [windows]
+
+  coverage:check:
+    desc: "Проверяет покрытие без запуска тестов"
+    cmds:
+      - task: coverage:threshold
+
+  goose:install:
+    desc: "Устанавливает goose (миграции БД)"
+    cmds:
+      - echo '📦 Устанавливаем goose...'
+      - GOBIN={{.BIN_DIR}} go install github.com/pressly/goose/v3/cmd/goose@{{.GOOSE_VERSION}}
+    status:
+      - test -x {{.GOOSE}}
+
+  up-core:
+    desc: "Создать общую сеть для микросервисов"
+    cmds:
+      - echo '[task] 🌐 Создаём общую сеть microservices-net'
+      - docker network rm microservices-net 2>/dev/null || true
+      - docker network create microservices-net 2>/dev/null || true
+
+  down-core:
+    desc: "Удалить общую сеть микросервисов"
+    cmds:
+      - echo '[task] 🛑 Удаляем общую сеть microservices-net'
+      - docker network rm microservices-net 2>/dev/null || true
+
+  up-order:
+    desc: Поднять Order сервис и все его зависимости
+    dir: deploy/compose/order
+    cmds:
+      - echo "[task] 📦 Поднимаем Order с зависимостями"
+      - docker compose --env-file ../../../order.env up --build --detach --wait --wait-timeout 60
+
+  down-order:
+    desc: Остановить и удалить Order сервис и все его зависимости
+    dir: deploy/compose/order
+    cmds:
+      - echo "[task] 🛑 Останавливаем Order с зависимостями"
+      - docker compose --env-file ../../../order.env down --volumes
+
+  up-inventory:
+    desc: Поднять Inventory сервис и все его зависимости
+    dir: deploy/compose/inventory
+    cmds:
+      - echo "[task] 📦 Поднимаем Inventory с зависимостями"
+      - docker compose --env-file ../../../inventory.env up --build --detach --wait --wait-timeout 60
+
+  down-inventory:
+    desc: Остановить и удалить Inventory сервис и все его зависимости
+    dir: deploy/compose/inventory
+    cmds:
+      - echo "[task] 🛑 Останавливаем Inventory с зависимостями"
+      - docker compose --env-file ../../../inventory.env down --volumes
+
+  up-payment:
+    desc: Поднять Payment сервис и все его зависимости
+    dir: deploy/compose/payment
+    cmds:
+      - echo "[task] 📦 Поднимаем Payment с зависимостями"
+      - docker compose --env-file ../../../payment.env up --build --detach --wait --wait-timeout 60
+
+  down-payment:
+    desc: Остановить и удалить Payment сервис и все его зависимости
+    dir: deploy/compose/payment
+    cmds:
+      - echo "[task] 🛑 Останавливаем Payment с зависимостями"
+      - docker compose --env-file ../../../payment.env down --volumes
+
+  up-all:
+    desc: Поднять все сервисы по очереди вместе с зависимостями
+    cmds:
+      - task up-core
+      - task up-inventory
+      - task up-payment
+      - task up-order
+
+  down-all:
+    desc: Остановить и удалить все сервисы по очереди вместе с зависимостями
+    cmds:
+      - task down-order
+      - task down-payment
+      - task down-inventory
+      - task down-core
+
+  migrate:order:up:
+    desc: "Применяет все миграции Order-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'order.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" up'
+
+  migrate:order:down:
+    desc: "Откатывает последнюю миграцию Order-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'order.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" down'
+
+  migrate:order:status:
+    desc: "Показывает статус миграций Order-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'order.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" status'
+
+  migrate:inventory:up:
+    desc: "Применяет все миграции Inventory-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'inventory.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" up'
+
+  migrate:inventory:down:
+    desc: "Откатывает последнюю миграцию Inventory-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'inventory.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" down'
+
+  migrate:inventory:status:
+    desc: "Показывает статус миграций Inventory-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'inventory.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" status'
+
+  migrate:payment:up:
+    desc: "Применяет все миграции Payment-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'payment.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" up'
+
+  migrate:payment:down:
+    desc: "Откатывает последнюю миграцию Payment-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'payment.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" down'
+
+  migrate:payment:status:
+    desc: "Показывает статус миграций Payment-сервиса"
+    deps: [ goose:install ]
+    dotenv: [ 'payment.env' ]
+    cmds:
+      - '{{.GOOSE}} -dir "$MIGRATIONS_DIR" postgres "$DB_URI" status'

@@ -6,7 +6,7 @@ option go_package = "github.com/yerkesh/shared/pkg/proto/payment/v1;paymentv1";
 
 // PaymentService обрабатывает оплату заказов
 service PaymentService {
-  // PayOrder обрабатывает оплату заказа
+  // PayOrder обрабатывает оплату заказа.
   rpc PayOrder(PayOrderRequest) returns (PayOrderResponse);
 }
 
